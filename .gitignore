@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Model Checkpoints (large binary weights)
+*.pth
+*.pt
+*.onnx
+checkpoints/
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local scratch and temp files
+scratch/
+temp/

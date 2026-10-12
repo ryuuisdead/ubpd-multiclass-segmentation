@@ -1,0 +1,29 @@
+DIAGNÓSTICO — unetpp_r34_scse — UBPD v34 K-Fold
+============================================================
+Fecha: 2026-05-16 22:43
+
+CONFIGURACIÓN:
+  Encoder: resnet34 + scSE | Decoder dropout: 0.30
+  Loss: FT(0.5) + BCE(0.3) + Boundary(0.2)
+  SWA: últimas 40 epochs | Label smooth: 0.05
+  EMA: True (decay=0.999)
+  TTA: ['original', 'hflip']
+  Threshold: 0.5 FIJO (sin TempScaling, sin PCT)
+  GroupKFold: separación garantizada por paciente
+  Norm stats: compute_fold_stats(train_fold) — sin leakage a val
+
+RESULTADOS — Base (t=0.5):
+  nerve     : 0.6019 ± 0.0500
+  muscle    : 0.6288 ± 0.0264
+  artery    : 0.6608 ± 0.0519
+  vein      : 0.7082 ± 0.1339
+  mean      : 0.6499 ± 0.0447
+
+RESULTADOS — TTA-hflip (t=0.5):
+  nerve     : 0.6027 ± 0.0490
+  muscle    : 0.6313 ± 0.0251
+  artery    : 0.6598 ± 0.0531
+  vein      : 0.7113 ± 0.1347
+  mean      : 0.6513 ± 0.0455
+
+>>> RESULTADO FINAL: Dice = 0.6513 ± 0.0455 (TTA-hflip, t=0.5) <<<
