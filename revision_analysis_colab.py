@@ -228,166 +228,85 @@ df.to_csv(csv_path, index=False)
 print('Guardado:', csv_path, '| filas:', len(df))
 
 # ------------------------------------------------------------
-# PARTE 2 — Análisis
+# PARTE 2 — ANÁLISIS ESTADÍSTICO PARA LA REVISIÓN
 # ------------------------------------------------------------
-def _dice(tp, fp, fn):
-    den = 2 * tp + fp + fn
-    return np.where(den > 0, 2 * tp / np.where(den > 0, den, 1), np.nan)
-
-
-def analyze(df, kind, mode, verbose=True):
-    d = df[(df.kind == kind) & (df.mode == mode)]
-    out = {'kind': kind, 'mode': mode}
-
-    # 2.1 Presencia de estructuras (imágenes y pacientes con GT presente)
-    pres = d[d.gt_area > 0].groupby('cls').agg(n_imagenes=('image', 'nunique'), n_pacientes=('patient', 'nunique'))
-    pres['n_imagenes_totales'] = d.image.nunique()
-    pres['n_pacientes_totales'] = d.patient.nunique()
-    out['presencia'] = pres.reindex(CLASSES).to_dict('index')
-
-    # 2.2 Dice agregado por fold (reproduce la Tabla del paper) y macro
-    s = d.groupby(['fold', 'cls'])[['tp', 'fp', 'fn']].sum()
-    s['dice'] = _dice(s.tp.values, s.fp.values, s.fn.values)
-    fold_macro = s['dice'].unstack()[CLASSES].mean(axis=1)
-    out['dice_macro_por_fold'] = fold_macro.round(4).to_dict()
-    out['dice_macro_media_folds'] = float(fold_macro.mean())
-    out['dice_macro_sd_ddof0'] = float(fold_macro.std(ddof=0))
-    out['dice_macro_sd_ddof1'] = float(fold_macro.std(ddof=1))
-
-    # 2.3 Agregado fuera de muestra sobre los 88 pacientes + IC 95 % bootstrap por paciente
-    patients = sorted(d.patient.unique())
-    agg = d.groupby(['patient', 'cls'])[['tp', 'fp', 'fn']].sum()
-    T = np.zeros((len(patients), len(CLASSES), 3))
-    for i, pt in enumerate(patients):
-        for j, c in enumerate(CLASSES):
-            T[i, j] = agg.loc[(pt, c)].values
-
-    def metrics(S):
-        tp, fp, fn = S[:, 0], S[:, 1], S[:, 2]
-        with np.errstate(divide='ignore', invalid='ignore'):
-            return _dice(tp, fp, fn), tp / (tp + fp), tp / (tp + fn)
-
-    dice, prec, rec = metrics(T.sum(0))
-    obs = np.concatenate([dice, [np.nanmean(dice)], prec, [np.nanmean(prec)], rec, [np.nanmean(rec)]])
-    boots = []
-    for _ in range(N_BOOT):
-        idx = RNG.integers(0, len(patients), len(patients))
-        dd, pp, rr = metrics(T[idx].sum(0))
-        boots.append(np.concatenate([dd, [np.nanmean(dd)], pp, [np.nanmean(pp)], rr, [np.nanmean(rr)]]))
-    lo, hi = np.nanpercentile(np.array(boots), [2.5, 97.5], axis=0)
-    names = [f'{m}_{c}' for m in ('dice', 'precision', 'recall') for c in CLASSES + ['macro']]
-    out['agregado_88_pacientes'] = {n: {'valor': round(float(o), 4), 'ic95': [round(float(l), 4), round(float(h), 4)]}
-                                    for n, o, l, h in zip(names, obs, lo, hi)}
-
-    # 2.4 Dice por paciente (pooled dentro del paciente; solo pacientes con la estructura presente)
-    pa = d.groupby(['patient', 'cls'])[['tp', 'fp', 'fn', 'gt_area']].sum()
-    pa['dice'] = _dice(pa.tp.values, pa.fp.values, pa.fn.values)
-    pp_ = pa[pa.gt_area > 0]
-    by_cls = pp_.groupby('cls').dice.agg(n='count', media='mean', sd='std', mediana='median',
-                                         q25=lambda x: x.quantile(.25), q75=lambda x: x.quantile(.75))
-    out['dice_por_paciente_por_clase'] = by_cls.reindex(CLASSES).round(4).to_dict('index')
-    pm = pp_.groupby('patient').dice.mean()
-    out['dice_macro_por_paciente'] = {'n': int(pm.count()), 'media': round(float(pm.mean()), 4),
-                                      'sd': round(float(pm.std()), 4), 'mediana': round(float(pm.median()), 4),
-                                      'q25': round(float(pm.quantile(.25)), 4), 'q75': round(float(pm.quantile(.75)), 4),
-                                      'min': round(float(pm.min()), 4), 'max': round(float(pm.max()), 4)}
-
-    # 2.5 Estados por imagen y HD95 convencional vs con penalización (como en el paper)
-    st = d.groupby(['cls', 'status']).size().unstack(fill_value=0).reindex(CLASSES)
-    for col in ['ok', 'miss', 'false_alarm', 'both_empty']:
-        if col not in st:
-            st[col] = 0
-    st['n_imagenes'] = st[['ok', 'miss', 'false_alarm', 'both_empty']].sum(axis=1)
-    st['tasa_omision_sobre_GT_presente_%'] = (100 * st['miss'] / (st['miss'] + st['ok'])).round(1)
-    st['tasa_falsa_alarma_sobre_GT_ausente_%'] = (100 * st['false_alarm'] / (st['false_alarm'] + st['both_empty'])).round(1)
-    out['estados_por_clase'] = st.to_dict('index')
-    hd_pen = d.assign(hd=np.where(d.status == 'ok', d.hd95, np.where(d.status == 'both_empty', 0.0, 300.0)))
-    hd_conv = d[d.status == 'ok'].groupby('cls').hd95.agg(n='count', media='mean', mediana='median',
-                                                           p95=lambda x: x.quantile(.95))
-    out['hd95_convencional_px(ambas_no_vacias)'] = hd_conv.reindex(CLASSES).round(2).to_dict('index')
-    out['hd95_con_penalizacion_px(todas_las_imagenes)'] = hd_pen.groupby('cls').hd.mean().reindex(CLASSES).round(2).to_dict()
-
-    # 2.6 Dice por imagen solo con GT presente
-    di = d[d.gt_area > 0].copy()
-    di['dice_img'] = _dice(di.tp.values, di.fp.values, di.fn.values)
-    out['dice_por_imagen_GT_presente'] = di.groupby('cls').dice_img.agg(
-        n='count', media='mean', mediana='median', q25=lambda x: x.quantile(.25),
-        q75=lambda x: x.quantile(.75)).reindex(CLASSES).round(4).to_dict('index')
-
-    if verbose:
-        print('\n' + '#' * 70)
-        print(f'# kind={kind} | mode={mode}')
-        print('#' * 70)
-        for k, v in out.items():
-            if k in ('kind', 'mode'):
-                continue
-            print(f'\n--- {k} ---')
-            print(json.dumps(v, indent=1, ensure_ascii=False, default=float))
-    return out
-
-
 print('\n' + '=' * 70)
-print('PARTE 2 — ANÁLISIS')
+print('PARTE 2 — ANÁLISIS ESTADÍSTICO PARA LA REVISIÓN')
 print('=' * 70)
-results = {}
-for kind in df.kind.unique():
-    for mode in ['base', 'tta']:
-        results[f'{kind}|{mode}'] = analyze(df, kind, mode, verbose=(mode == 'tta'))
 
-if 'swa' in df.kind.unique():
-    a = results['best_ema|tta']['dice_macro_media_folds']
-    b = results['swa|tta']['dice_macro_media_folds']
-    print(f'\nSENSIBILIDAD AL CHECKPOINT (TTA): best_ema={a:.4f} | swa={b:.4f} | Δ(best_ema − swa)={a - b:+.4f}')
-    print('Por fold:', {k: (results["best_ema|tta"]["dice_macro_por_fold"][k],
-                            results["swa|tta"]["dice_macro_por_fold"][k])
-                       for k in results['best_ema|tta']['dice_macro_por_fold']})
+d = df[(df['kind'] == 'best_ema') & (df['mode'] == 'tta')]
 
-out_json = os.path.join(RESULTS_DIR, 'revision_analysis_v34.json')
-with open(out_json, 'w', encoding='utf-8') as f:
-    json.dump(results, f, indent=2, ensure_ascii=False, default=float)
-print('Guardado:', out_json)
+print('\n--- Presencia de estructuras en GT (imágenes y pacientes) ---')
+for c in CLASSES:
+    sub = d[d['cls'] == c]
+    pres = sub[sub['gt_area'] > 0]
+    p_tot = sub['patient'].nunique()
+    p_pres = pres['patient'].nunique()
+    print(f'  {c:8s}: {len(pres):3d}/{len(sub)} imgs ({100*len(pres)/len(sub):.1f}%) | '
+          f'{p_pres:2d}/{p_tot} pacs ({100*p_pres/p_tot:.1f}%) con la estructura')
 
-# ------------------------------------------------------------
-# PARTE 3 (opcional) — Partición independiente (evaluación UNA sola vez, sin ajustar nada)
-# ------------------------------------------------------------
-if TEST_IMAGES_DIR and TEST_ANNOTATIONS_DIR:
-    print('\n' + '=' * 70)
-    print('PARTE 3 — PARTICIÓN INDEPENDIENTE')
-    print('=' * 70)
-    t_imgs = sorted(f for f in os.listdir(TEST_IMAGES_DIR) if f.endswith('.jpg'))
-    test_pairs = []
-    for f in t_imgs:
-        j = os.path.join(TEST_ANNOTATIONS_DIR, f.replace('.jpg', '.json'))
-        if os.path.exists(j):
-            test_pairs.append({'image_path': os.path.join(TEST_IMAGES_DIR, f), 'annotation_path': j,
-                               'name': f.replace('.jpg', '')})
-    t_pat = {get_patient_id(p['image_path']) for p in test_pairs}
-    tr_pat = {get_patient_id(p['image_path']) for p in data_pairs}
-    print(f'Pares: {len(test_pairs)} | pacientes: {len(t_pat)} | '
-          f'SOLAPAMIENTO con los 88 de entrenamiento/validación: {len(t_pat & tr_pat)} (debe ser 0)')
+print('\n--- Dice acumulado (pooled) por fold (réplica tabla del paper) ---')
+for f in sorted(d['fold'].unique()):
+    sub = d[d['fold'] == f]
+    row = []
+    for c in CLASSES:
+        sc = sub[sub['cls'] == c]
+        dice = (2 * sc['tp'].sum() + 1.0) / (2 * sc['tp'].sum() + sc['fp'].sum() + sc['fn'].sum() + 1.0)
+        row.append(dice)
+    print(f'  Fold {f}: ' + ' '.join(f'{c[:3]}={v:.4f}' for c, v in zip(CLASSES, row)) + f' | macro={np.mean(row):.4f}')
 
-    per_model, ens_logits, t_masks = [], [], None
-    for fold_idx in range(len(FOLD_SPLITS)):
-        h = all_fold_histories[f'fold_{fold_idx}']
-        path = os.path.join(CHECKPOINT_DIR, f'{MODEL_NAME}_fold{fold_idx}_best_ema.pth')
-        model = build_model().to(DEVICE)
-        model.load_state_dict(torch.load(path, map_location=DEVICE, weights_only=False)['model_state_dict'])
-        model.eval()
-        loader = DataLoader(UBPDDataset(test_pairs, get_val_transform(IMAGE_SIZE, h['fold_mean'], h['fold_std'])),
-                            batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-        logits, t_masks = _predict_loader_tta(model, loader, DEVICE)
-        ens_logits.append(logits)
-        rows = pd.DataFrame(_rows_from_logits(logits, t_masks, test_pairs, 'best_ema', 'tta', fold_idx + 1))
-        g = rows.groupby('cls')[['tp', 'fp', 'fn']].sum().reindex(CLASSES)
-        dd = _dice(g.tp.values, g.fp.values, g.fn.values)
-        per_model.append(dd)
-        print(f'  modelo fold {fold_idx + 1}: Dice por clase {np.round(dd, 4)} | macro {np.nanmean(dd):.4f}')
-        del model
-        torch.cuda.empty_cache()
-    pm_ = np.array(per_model)
-    print(f'\nMedia ± SD entre los 5 modelos (macro): {np.nanmean(pm_, axis=1).mean():.4f} ± {np.nanmean(pm_, axis=1).std(ddof=0):.4f}')
-    ens = torch.stack(ens_logits).mean(0)
-    rows = pd.DataFrame(_rows_from_logits(ens, t_masks, test_pairs, 'ensemble', 'tta', 0))
-    g = rows.groupby('cls')[['tp', 'fp', 'fn']].sum().reindex(CLASSES)
-    dd = _dice(g.tp.values, g.fp.values, g.fn.values)
-    print(f'Ensamble de 5 modelos: Dice por clase {np.round(dd, 4)} | macro {np.nanmean(dd):.4f}')
+def patient_level_dice(sub):
+    pacs = sub['patient'].unique()
+    scores = {c: [] for c in CLASSES}
+    scores['macro'] = []
+    for p in pacs:
+        sp = sub[sub['patient'] == p]
+        d_p = []
+        for c in CLASSES:
+            sc = sp[sp['cls'] == c]
+            denom = 2 * sc['tp'].sum() + sc['fp'].sum() + sc['fn'].sum()
+            dice = (2 * sc['tp'].sum()) / denom if denom > 0 else np.nan
+            scores[c].append(dice)
+            if denom > 0:
+                d_p.append(dice)
+        scores['macro'].append(np.mean(d_p) if len(d_p) else np.nan)
+    return scores
+
+print('\n--- Dice a nivel de paciente (N=88) y Bootstrap IC 95% ---')
+p_scores = patient_level_dice(d)
+for k in CLASSES + ['macro']:
+    vals = np.array([v for v in p_scores[k] if not np.isnan(v)])
+    boot_means = [np.mean(RNG.choice(vals, size=len(vals), replace=True)) for _ in range(N_BOOT)]
+    ci_low, ci_high = np.percentile(boot_means, [2.5, 97.5])
+    print(f'  {k:8s} (N={len(vals)}): mean={vals.mean():.4f} | median={np.median(vals):.4f} | '
+          f'IQR=[{np.percentile(vals, 25):.4f}, {np.percentile(vals, 75):.4f}] | '
+          f'IC 95%: [{ci_low:.4f}, {ci_high:.4f}]')
+
+print('\n--- Desglose de estados de detección (imágenes individuales) ---')
+for c in CLASSES:
+    sub = d[d['cls'] == c]
+    counts = sub['status'].value_counts()
+    print(f'  {c:8s}: ok={counts.get("ok", 0)} ({100*counts.get("ok",0)/len(sub):.1f}%) | '
+          f'miss={counts.get("miss", 0)} ({100*counts.get("miss",0)/len(sub):.1f}%) | '
+          f'false_alarm={counts.get("false_alarm", 0)} ({100*counts.get("false_alarm",0)/len(sub):.1f}%) | '
+          f'both_empty={counts.get("both_empty", 0)} ({100*counts.get("both_empty",0)/len(sub):.1f}%)')
+
+print('\n--- Distancia Hausdorff 95 (HD95) ---')
+for c in CLASSES:
+    sub = d[d['cls'] == c]
+    ok_hd = sub[sub['status'] == 'ok']['hd95']
+    hd_penalized = np.where(sub['status'] == 'ok', sub['hd95'],
+                            np.where(sub['status'] == 'both_empty', 0.0, 300.0))
+    print(f'  {c:8s}: '
+          f'Convencional (solo OK, N={len(ok_hd)}): mean={ok_hd.mean():.2f} ± {ok_hd.std(ddof=1):.2f} px | '
+          f'Penalizada 300px (todas, N={len(sub)}): mean={hd_penalized.mean():.2f} ± {hd_penalized.std(ddof=1):.2f} px')
+
+if 'swa' in df['kind'].unique():
+    print('\n--- Sensibilidad de Checkpoints (best_ema vs swa en modo TTA) ---')
+    d_swa = df[(df['kind'] == 'swa') & (df['mode'] == 'tta')]
+    if len(d_swa):
+        p_ema = patient_level_dice(d)['macro']
+        p_swa = patient_level_dice(d_swa)['macro']
+        print(f'  best_ema macro mean paciente: {np.nanmean(p_ema):.4f}')
+        print(f'  swa      macro mean paciente: {np.nanmean(p_swa):.4f}')
+        print(f'  Diferencia absoluta (EMA - SWA): {np.nanmean(p_ema) - np.nanmean(p_swa):.4f}')
