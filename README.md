@@ -1,4 +1,4 @@
-# Multiclass Segmentation of Anatomical Structures in Brachial Plexus Ultrasound Images (UBPD)
+# Multi-structure Segmentation of Anatomical Structures in Brachial Plexus Ultrasound Images (UBPD)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ryuuisdead/ubpd-multiclass-segmentation/blob/main/notebookubpd_v34_kfold_colab.ipynb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -7,8 +7,8 @@
 
 This repository contains the complete experimental code, cross-validation protocol, and evaluation artifacts for the paper:
 
-> **"Modelo para la segmentación multiclase de estructuras anatómicas en imágenes de ultrasonido del plexo braquial"**  
-> *Jesús Alejandro Colmenero Sotelo, Alejandro Mauricio González, María del Refugio Rodríguez Ruiz, Sodel Vázquez Reyes, Julieta Guadalupe Rodríguez Ruiz* (2026).
+> **"Modelo para la segmentación multiestructura de estructuras anatómicas en imágenes de ultrasonido del plexo braquial"**  
+> *Jesús Alejandro Colmenero Sotelo, Julieta Guadalupe Rodríguez Ruiz, Alejandro Mauricio González, María del Refugio Rodríguez Ruiz, Sodel Vázquez Reyes* (2026).
 
 ---
 
@@ -44,7 +44,8 @@ This project implements a reproducible, **patient-disjoint 5-Fold GroupKFold** e
 | **Muscle (Músculo)** | $0.6313 \pm 0.0251$ | $0.4618 \pm 0.0269$ | $0.5735 \pm 0.0427$ | $0.7064 \pm 0.0366$ | $99.40 \pm 7.00$ |
 | **Artery (Arteria)** | $0.6598 \pm 0.0531$ | $0.4948 \pm 0.0622$ | $0.6229 \pm 0.0783$ | $0.7144 \pm 0.0819$ | $92.28 \pm 17.46$ |
 | **Vein (Vena)** | $0.7113 \pm 0.1347$ | $0.5674 \pm 0.1480$ | $0.6602 \pm 0.1784$ | $0.8025 \pm 0.0773$ | $91.17 \pm 29.36$ |
-| **Macro Average** | **$0.6513 \pm 0.0455$** | **$0.4893 \pm 0.0519$** | **$0.6497 \pm 0.0558$** | **$0.6832 \pm 0.0451$** | **$87.17 \pm 15.15$** |
+| **Macro Average** | **$0.6513 \pm 0.0455$** | **$0.4893 \pm 0.0519$** | **$0.6497 \pm 0.0558$** | $0.6832 \pm 0.0451$ | **$87.17 \pm 15.15$** |
+> *Note on HD95*: HD95 is computed on resized $384 \times 384$ px masks with an explicit 300 px penalty on one-sided misses ($HD95^*$). It measures spatial discrepancy and detection failure rate rather than physical distance in millimeters.
 
 ---
 
@@ -62,6 +63,7 @@ Representative predictions across all 5 folds evaluated at $t=0.5$:
 
 ```text
 ├── notebookubpd_v34_kfold_colab.ipynb   # Complete training, cross-validation & evaluation notebook
+├── revision_analysis_colab.py           # Analysis script for patient bootstrap CI, sensitivity & metrics
 ├── results_v34/                         # All quantitative evaluation files and generated plots
 │   ├── diagnostic_v34.txt               # Plaintext summary of configuration and metrics
 │   ├── analysis_data_v34.json           # Raw per-class and per-fold metric arrays
@@ -74,7 +76,7 @@ Representative predictions across all 5 folds evaluated at $t=0.5$:
 │   ├── metrics_by_class_v34.png         # Bar plot of metrics by anatomical class
 │   ├── training_curves_v34.png          # Loss and Dice training trajectories
 │   └── predictions_comparison_v34.png   # Qualitative visual predictions
-├── .gitignore                           # Git ignore rules (ignores heavy checkpoints)
+├── .gitignore                           # Git ignore rules (ignores heavy checkpoints and docs)
 ├── LICENSE                              # MIT License
 └── README.md                            # Project documentation
 ```
@@ -104,11 +106,11 @@ Representative predictions across all 5 folds evaluated at $t=0.5$:
 If you use this code or findings in your research, please cite:
 
 ```bibtex
-@article{colmenero2026ubpd,
-  title   = {Modelo para la segmentaci{\'o}n multiclase de estructuras anat{\'o}micas en im{\'a}genes de ultrasonido del plexo braquial},
-  author  = {Colmenero Sotelo, Jes{\'u}s Alejandro and Gonz{\'a}lez, Alejandro Mauricio and Rodr{\'i}guez Ruiz, Mar{\'i}a del Refugio and V{\'a}zquez Reyes, Sodel and Rodr{\'i}guez Ruiz, Julieta Guadalupe},
-  journal = {Interciencia},
-  year    = {2026}
+@inproceedings{colmenero2026ubpd,
+  title     = {Modelo para la segmentaci{\'o}n multiestructura de estructuras anat{\'o}micas en im{\'a}genes de ultrasonido del plexo braquial},
+  author    = {Colmenero Sotelo, Jes{\'u}s Alejandro and Rodr{\'i}guez Ruiz, Julieta Guadalupe and Gonz{\'a}lez, Alejandro Mauricio and Rodr{\'i}guez Ruiz, Mar{\'i}a del Refugio and V{\'a}zquez Reyes, Sodel},
+  booktitle = {Coloquio Internacional de Investigaci{\'o}n InterCiencias},
+  year      = {2026}
 }
 ```
 

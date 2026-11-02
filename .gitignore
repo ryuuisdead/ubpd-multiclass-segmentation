@@ -28,3 +28,5 @@ Thumbs.db
 # Local scratch and temp files
 scratch/
 temp/
+*.docx
+*.pdf
